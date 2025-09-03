@@ -1,21 +1,22 @@
 // server.mjs — Backend Image Harvester (Codespaces-ready, ESM) 
-import express from "express"; import cors from "cors";
+import express from "express";
+import cors from "cors";
 import fetch from "node-fetch";             // v2
 import robotsParser from "robots-parser";
 import { chromium } from "playwright";      // Chromium Playwright (cloud)
 import Archiver from "archiver";
-import cors from "cors";
+
+const app = express();
 app.use(cors({
   origin:"*",
   methods:["GET","POST","OPTIONS"],
   allowedHeaders:["content-type"]
 }));
-
-// -------------------- App base -------------------- 
-const app = express(); app.use(cors()); app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "1mb" }));
 
 // -------------------- Utils ----------------------- 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); const hostOf = (u) => {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); 
+const hostOf = (u) => {
   try { return new URL(u).hostname.replace(/^www\./, ""); }
   catch (e) { return u; }
 };
