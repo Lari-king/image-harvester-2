@@ -1,99 +1,375 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr" class="dark">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Image Harvester</title>
-    <!-- Tailwind -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = { darkMode: "class" };
-    </script>
-    <!-- React 18 -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  </head>
-  <body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
-    <div id="root" class="flex-1"></div>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Image Harvester</title>
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script> tailwind.config = { darkMode: 'class' } </script>
+  <!-- React 18 -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+</head>
+<body class="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50">
+  <div id="root"></div>
 
-    <script type="module">
-      // -------------------------------
-      // Choix de l’API dynamique
-      // -------------------------------
-      const API = (() => {
-        const u = new URL(location.href);
-        const param = u.searchParams.get("api");
-        if (param) return param; // priorité au ?api=...
-        // Fallback (met ici un Codespace par défaut si tu veux éviter de taper ?api= à chaque fois)
-        return "https://turbo-space-barnacle-5g5wgxv76qgq2p7vv-3001.app.github.dev/";
-      })();
+  <script type="module">
+    // -------------------------------
+    // API dynamique via ?api=
+    // -------------------------------
+    const FALLBACK_API = "https://turbo-space-barnacle-5g5wgxv76qgq2p7vv-3001.app.github.dev/"; // <-- mets ici ton URL par défaut
+    const API = (() => {
+      const u = new URL(location.href);
+      const p = u.searchParams.get("api");
+      return (p && /^https:\/\//.test(p)) ? p : FALLBACK_API;
+    })();
 
-      const e = React.createElement;
+    const { useState, useEffect, useMemo } = React;
+    const e = React.createElement;
+    const mediaIcon = (m)=> m.kind==="video" ? "🎞️" : "🖼️";
 
-      function App() {
-        const [urls, setUrls] = React.useState("");
-        const [logs, setLogs] = React.useState([]);
-        const [images, setImages] = React.useState([]);
+    function Steps({log}) {
+      const done = log?.filter(s=>s.status!=="pending").length || 0;
+      const pct  = log?.length ? Math.round((done/log.length)*100) : 0;
+      return e('div', { className:"space-y-2" },
+        e('div', { className:"w-full h-2 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden" },
+          e('div', { className:"h-2 bg-emerald-500 transition-all", style:{ width:`${pct}%` }})
+        ),
+        e('ul', { className:"grid md:grid-cols-2 gap-2 text-sm" },
+          (log||[]).map((step,i)=> e('li', {
+            key:i,
+            className:
+              "flex items-center justify-between px-3 py-2 rounded-xl border " +
+              (step.status==="success" ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-900/30" :
+               step.status==="running" ? "border-amber-400 bg-amber-50 dark:bg-amber-900/30" :
+               step.status==="error" ? "border-rose-400 bg-rose-50 dark:bg-rose-900/30" :
+               "border-zinc-200 dark:border-zinc-800")
+          },
+            e('span', { className:"truncate" }, step.name),
+            step.status==="success" && "✅",
+            step.status==="running" && "⏳",
+            step.status==="error" && "❌"
+          ))
+        )
+      );
+    }
 
-        const startAnalysis = async () => {
-          setLogs([]);
-          setImages([]);
-          try {
-            const res = await fetch(`${API}/api/jobs`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ urls: urls.split("\n").map(u => u.trim()).filter(Boolean) })
-            });
-            if (!res.ok) throw new Error("Erreur job");
-            const { jobId } = await res.json();
-            setLogs(l => [...l, "Job lancé: " + jobId]);
-
-            // Connexion SSE pour suivre la progression
-            const es = new EventSource(`${API}/api/run/${jobId}`);
-            es.onmessage = ev => {
-              try {
-                const data = JSON.parse(ev.data);
-                if (data.type === "log") {
-                  setLogs(l => [...l, data.message]);
-                } else if (data.type === "done") {
-                  setLogs(l => [...l, "Analyse terminée ✅"]);
-                  setImages(data.results || []);
-                  es.close();
-                }
-              } catch (err) {
-                console.error(err);
-              }
-            };
-          } catch (err) {
-            setLogs(l => [...l, "Erreur: " + err.message]);
-          }
-        };
-
-        return e("div", { className: "p-6 space-y-4 max-w-3xl mx-auto" }, [
-          e("h1", { className: "text-2xl font-bold" }, "Image Harvester"),
-          e("p", {}, "Backend API: " + API),
-          e("textarea", {
-            value: urls,
-            onChange: ev => setUrls(ev.target.value),
-            className: "w-full p-2 rounded bg-gray-800 border border-gray-700",
-            placeholder: "Collez 1 URL par ligne (ex: https://zara.com …)"
-          }),
-          e("button", {
-            className: "px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded",
-            onClick: startAnalysis
-          }, "Lancer l’analyse"),
-          e("div", { className: "bg-black/40 p-2 rounded max-h-48 overflow-auto text-sm" },
-            logs.map((l, i) => e("div", { key: i }, l))
-          ),
-          e("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-2" },
-            images.map((src, i) =>
-              e("img", { key: i, src, className: "rounded shadow" })
+    function MediaCard({m, selected, onSelect, onPreview, onDownload}) {
+      return e('figure', { className:"relative rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800" },
+        (m.kind==="video"
+          ? e('video', { src:m.url, className:"w-full h-40 object-cover", muted:true, controls:false })
+          : e('img', { src:m.url, alt:m.alt||"", className:"w-full h-40 object-cover" })
+        ),
+        e('div', { className:"absolute top-2 right-2 flex gap-1" },
+          e('span', { className:"px-2 py-1 rounded bg-white/80 dark:bg-zinc-900/80 text-xs" }, mediaIcon(m)),
+          m.isDuplicate && e('span', { className:"px-2 py-1 rounded bg-rose-600 text-white text-xs" }, "doublon")
+        ),
+        e('div', { className:"absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-2 text-white text-[12px] flex items-center gap-2 justify-between" },
+          e('span', { className:"truncate" }, m.fileName || m.url.split('/').pop()),
+          e('div', { className:"flex items-center gap-2" },
+            e('button', { onClick:()=> onPreview(m), className:"px-2 py-1 bg-white/20 rounded active:scale-95" }, "Voir"),
+            e('button', { onClick:()=> onDownload(m.url), className:"px-2 py-1 bg-white/20 rounded active:scale-95" }, "Télécharger"),
+            e('label', { className:"bg-white/20 px-2 py-1 rounded cursor-pointer" },
+              e('input', { type:"checkbox", checked:!!selected[m.url], onChange:()=>onSelect(m.url) }),
+              " sel."
             )
           )
-        ]);
+        )
+      );
+    }
+
+    function App() {
+      const [dark, setDark] = useState(true);
+      useEffect(()=> { document.documentElement.classList.toggle('dark', dark); }, [dark]);
+
+      const [urls, setUrls] = useState(["","","","",""]);
+      const [mode, setMode] = useState("compliance");
+      const [forceAccepted, setForceAccepted] = useState(false);
+      const [forceRobots, setForceRobots] = useState(false);
+      const [showLegal, setShowLegal] = useState(false);
+
+      const [isRunning, setIsRunning] = useState(false);
+      const [runs, setRuns] = useState([]);
+      const [activeTab, setActiveTab] = useState("overview");
+      const [stats, setStats] = useState({total:0, images:0, videos:0, duplicates:0});
+      const [metaVisible, setMetaVisible] = useState(false);
+
+      const [selected, setSelected] = useState({});
+      const [collections, setCollections] = useState([]);
+      const [addingColl, setAddingColl] = useState(false);
+      const [collName, setCollName] = useState("");
+
+      const [preview, setPreview] = useState(null);
+
+      const validUrls = useMemo(()=> urls.map(u=>u.trim()).filter(Boolean).slice(0,5), [urls]);
+      function toggleSelect(url){ setSelected(p=>({...p, [url]: !p[url]})); }
+      const allSelectedUrls = ()=> Object.entries(selected).filter(([,v])=>v).map(([u])=>u);
+
+      async function copyUrls() {
+        const list = allSelectedUrls();
+        if (!list.length) return alert("Sélectionne au moins un média.");
+        await navigator.clipboard.writeText(list.join("\n"));
+        alert(`${list.length} URL(s) copiée(s).`);
+      }
+      async function downloadZip() {
+        const list = allSelectedUrls();
+        if (!list.length) return alert("Sélectionne au moins un média.");
+        const r = await fetch(`${API}/api/zip`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ urls: list }) });
+        if(!r.ok) return alert("Téléchargement ZIP impossible.");
+        const blob = await r.blob(); const a=document.createElement('a');
+        a.href=URL.createObjectURL(blob); a.download=`media-${Date.now()}.zip`; a.click(); URL.revokeObjectURL(a.href);
+      }
+      function downloadOne(url) {
+        const a=document.createElement('a');
+        a.href=`${API}/api/file?url=${encodeURIComponent(url)}`;
+        a.download=""; a.target="_blank"; a.click();
       }
 
-      ReactDOM.createRoot(document.getElementById("root")).render(e(App));
-    </script>
-  </body>
+      function addSelectionToCollection(name) {
+        const list = allSelectedUrls();
+        if (!name?.trim()) return alert("Nom de la collection ?");
+        if (!list.length) return alert("Sélectionne des médias.");
+        setCollections(prev=>{
+          const i = prev.findIndex(c=>c.name.toLowerCase()===name.toLowerCase());
+          if (i>=0) {
+            const c = {...prev[i]}; const set = new Set(c.items);
+            list.forEach(u=> set.add(u)); c.items = Array.from(set);
+            return prev.map((x,idx)=> idx===i ? c : x);
+          }
+          return [...prev, { name, items:[...list] }];
+        });
+        setAddingColl(false); setCollName("");
+        alert(`Ajouté à « ${name} » (${list.length} média(s)).`);
+      }
+
+      // --- RUN avec la bonne séquence: POST /jobs -> SSE /stream/:id -> POST /run/:id
+      async function run() {
+        if (!validUrls.length) return alert("Ajoute au moins 1 URL.");
+        if (forceRobots && !forceAccepted) return alert("Tu dois d’abord accepter l’avertissement pour forcer robots.txt.");
+
+        setIsRunning(true);
+        setRuns([]); setSelected({}); setStats({total:0, images:0, videos:0, duplicates:0});
+        setActiveTab("overview");
+
+        try {
+          // 1) créer job
+          const jobRes = await fetch(`${API}/api/jobs`, {
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({ urls: validUrls, options: { respectRobots:true, forceRobots:!!forceRobots, mode, timeoutMs: mode==="overdrive"? 20000 : 25000, maxScrolls: 12 } })
+          });
+          if(!jobRes.ok) throw new Error("jobs: " + jobRes.status);
+          const { jobId } = await jobRes.json();
+
+          // 2) ouvrir stream
+          const es = new EventSource(`${API}/api/stream/${jobId}`);
+          const resultsBySite = {};
+          const updateRuns = () => {
+            const arr = Object.entries(resultsBySite).map(([site, rec]) => ({
+              site, ok: rec.ok, log: rec.log, media: rec.media
+            }));
+            setRuns(arr);
+          };
+
+          es.onmessage = (ev) => {
+            try{
+              const msg = JSON.parse(ev.data);
+              const { type, payload } = msg;
+              if (type==="progress") {
+                const { site, log } = payload;
+                resultsBySite[site] = resultsBySite[site] || { log:[], media:[], ok:null };
+                resultsBySite[site].log = log; updateRuns();
+              }
+              if (type==="media") {
+                const { site, chunk } = payload;
+                resultsBySite[site] = resultsBySite[site] || { log:[], media:[], ok:null };
+                resultsBySite[site].media = [...resultsBySite[site].media, ...chunk]; updateRuns();
+                const all = Object.values(resultsBySite).flatMap(r=>r.media);
+                const images = all.filter(m=>m.kind==="image").length;
+                const videos = all.filter(m=>m.kind==="video").length;
+                const duplicates = all.filter(m=>m.isDuplicate).length;
+                setStats({ total: all.length, images, videos, duplicates });
+              }
+              if (type==="siteDone") {
+                const { site, ok } = payload;
+                resultsBySite[site] = resultsBySite[site] || { log:[], media:[], ok:null };
+                resultsBySite[site].ok = ok; updateRuns();
+              }
+              if (type==="done") {
+                es.close();
+                setIsRunning(false);
+                setActiveTab("gallery");
+              }
+            } catch(e) { console.error(e); }
+          };
+
+          es.onerror = () => {
+            es.close();
+            setIsRunning(false);
+            alert("Stream interrompu (vérifie l’URL de l’API ou si le back tourne bien).");
+          };
+
+          // 3) lancer le job
+          const runRes = await fetch(`${API}/api/run/${jobId}`, {
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({ options: { respectRobots:true, forceRobots:!!forceRobots, mode, timeoutMs: mode==="overdrive"? 20000 : 25000, maxScrolls: 12 } })
+          });
+          if(!runRes.ok) console.warn("run status", runRes.status);
+
+        } catch (err) {
+          console.error(err);
+          alert("Erreur: " + err.message);
+          setIsRunning(false);
+        }
+      }
+
+      // UI
+      return e('div', { className:"max-w-7xl mx-auto p-6 space-y-6" },
+        // Header
+        e('div', { className:"flex items-center justify-between" },
+          e('div', { className:"flex items-center gap-3" },
+            e('div', { className:"h-10 w-10 rounded-2xl bg-white/70 dark:bg-white/10 backdrop-blur flex items-center justify-center shadow-sm" }, "✨"),
+            e('div', null,
+              e('h1', { className:"text-2xl font-semibold" }, "Image Harvester"),
+              e('div', { className:"text-xs text-zinc-500 dark:text-zinc-400" }, "API: ", API)
+            )
+          ),
+          e('div', { className:"flex items-center gap-2" },
+            e('button', { onClick:()=> setDark(d=>!d), className:"px-3 py-1 rounded-full border border-zinc-300 dark:border-zinc-700 active:scale-95 transition" }, "Thème"),
+            e('div', { className:"flex rounded-full overflow-hidden border border-zinc-300 dark:border-zinc-700" },
+              e('button', { onClick:()=> setMode("compliance"), className:"px-3 py-1 text-xs " + (mode==="compliance"?"bg-emerald-600 text-white":"bg-white dark:bg-zinc-800") }, "Compliance"),
+              e('button', { onClick:()=> setMode("overdrive"), className:"px-3 py-1 text-xs " + (mode==="overdrive"?"bg-rose-600 text-white":"bg-white dark:bg-zinc-800") }, "Overdrive")
+            )
+          )
+        ),
+
+        // Inputs
+        e('div', { className:"rounded-3xl p-5 bg-white/70 dark:bg-white/10 backdrop-blur space-y-4" },
+          e('div', { className:"grid md:grid-cols-5 gap-2" },
+            [0,1,2,3,4].map(i=> e('input', {
+              key:i, value:urls[i]||"", placeholder:`https://exemple-${i+1}.com`,
+              onChange: ev=> setUrls(prev=> prev.map((v,idx)=> idx===i? ev.target.value : (prev[idx]||""))),
+              className:"px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900"
+            }))
+          ),
+          e('div', { className:"flex items-center gap-3 text-sm" },
+            e('label', { className:"flex items-center gap-2" },
+              e('input', {
+                type:"checkbox", checked:forceRobots,
+                onChange:(e)=> {
+                  if (e.target.checked && !forceAccepted) { e.preventDefault(); setShowLegal(true); }
+                  else setForceRobots(e.target.checked);
+                }
+              }),
+              "Forcer robots.txt (warning)"
+            ),
+            e('span', { className:"text-zinc-500 dark:text-zinc-400" }, "Overdrive reste conforme ; le forçage nécessite ton accord explicite.")
+          ),
+          e('div', { className:"flex items-center gap-2" },
+            e('button', { onClick: run, disabled: !urls.some(u=>u?.trim()) || isRunning, className:"px-5 py-2 rounded-full bg-black text-white active:scale-95 transition disabled:opacity-50" }, isRunning?"Analyse…":"Lancer"),
+            e('button', { onClick:()=>{ setUrls(["","","","",""]); setRuns([]); setSelected({}); }, className:"px-5 py-2 rounded-full bg-zinc-200 dark:bg-zinc-800 active:scale-95 transition" }, "Reset")
+          )
+        ),
+
+        // Statistiques + Cinématique
+        runs.length>0 && e('div', { className:"space-y-4" },
+          e('div', { className:"text-sm text-zinc-600 dark:text-zinc-300" },
+            `Statistiques : ${stats.total} média(s) — ${stats.images} images • ${stats.videos} vidéos • ${stats.duplicates} doublons`
+          ),
+          runs.map(r => e('div', { key:r.site, className:"rounded-2xl p-4 border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-white/10 space-y-3" },
+            e('div', { className:"flex items-center justify-between" },
+              e('div', { className:"font-semibold" }, r.site),
+              (r.ok===true) ? e('span', { className:"px-2 py-0.5 rounded bg-emerald-600 text-white text-xs" }, "Terminée")
+              : (r.ok===false) ? e('span', { className:"text-rose-600" }, "✗ Échec")
+              : e('span', { className:"text-amber-600" }, "En cours…")
+            ),
+            e(Steps, { log: r.log||[] }),
+            (r.ok===false && r.log?.some(s=>s.error)) && e('div', { className:"text-sm text-rose-600" },
+              "Erreur : ", r.log.find(s=>s.error)?.error
+            )
+          ))
+        ),
+
+        // Tabs
+        e('div', { className:"flex gap-2" },
+          ["overview","gallery"].map(k =>
+            e('button', { key:k, onClick:()=> setActiveTab(k), className:`px-3 py-1.5 rounded-full text-sm ${activeTab===k ? "bg-black text-white" : "bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700"}` }, k)
+          )
+        ),
+
+        // Content
+        activeTab==="overview"
+          ? e('div', null, runs.length? "Analyse en direct ci-dessus." : "Prêt à analyser")
+          : e('div', { className:"space-y-4" },
+              e('div', { className:"flex items-center gap-2" },
+                e('button', { onClick: copyUrls, className:"px-3 py-2 rounded-full bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700" }, "Copier URL(s)"),
+                e('button', { onClick: downloadZip, className:"px-3 py-2 rounded-full bg-black text-white" }, "Télécharger ZIP"),
+                e('label', { className:"ml-auto flex items-center gap-2 text-sm" },
+                  e('input', { type:"checkbox", checked:metaVisible, onChange:()=> setMetaVisible(v=>!v) }),
+                  "Afficher métadonnées"
+                )
+              ),
+              runs.map(r =>
+                e('div', { key:r.site },
+                  e('div', { className:"font-medium mb-2" }, r.site),
+                  e('div', { className:"grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3" },
+                    (r.media||[]).map(m =>
+                      e('div', { key:m.url, className:"space-y-1" },
+                        e(MediaCard, { m, selected, onSelect: (u)=> setSelected(p=>({...p, [u]: !p[u]})), onPreview:setPreview, onDownload:downloadOne }),
+                        metaVisible && e('div', { className:"text-[11px] text-zinc-600 dark:text-zinc-300 space-y-0.5" },
+                          e('div', null, "Type : ", m.contentType || m.kind),
+                          (m.width && m.height) && e('div', null, `Dim : ${m.width}×${m.height}`),
+                          m.size && e('div', null, `Poids : ~${Math.round(m.size/1024)} kB`),
+                          m.pageUrl && e('div', { className:"truncate" }, "Page : ", e('a', { href:m.pageUrl, target:"_blank", className:"underline" }, m.pageUrl))
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            ),
+
+        // Modal juridique
+        showLegal && e('div', { className:"fixed inset-0 bg-black/40 flex items-center justify-center" },
+          e('div', { className:"bg-white dark:bg-zinc-900 p-6 rounded-2xl max-w-md space-y-4" },
+            e('h2', { className:"font-bold text-lg" }, "Avertissement — responsabilité de l’utilisateur"),
+            e('p', { className:"text-sm text-zinc-600 dark:text-zinc-300 whitespace-pre-line" },
+              "En choisissant d’ignorer les indications du fichier robots.txt, vous reconnaissez agir sciemment contre les pratiques standards du web et en assumant seul la pleine et entière responsabilité des conséquences possibles (blocage de votre adresse IP, actions juridiques éventuelles des éditeurs des sites analysés, ou toute autre conséquence technique ou légale).\n\nL’éditeur de la plateforme ne cautionne pas ce mode, ne fournit aucune garantie quant à son utilisation et décline toute responsabilité en cas de dommage, sanction, ou perte résultant de son usage.\n\nEn validant, vous confirmez être le seul responsable et décharger expressément l’éditeur de toute responsabilité."
+            ),
+            e('div', { className:"flex justify-end gap-2" },
+              e('button', { onClick:()=> setShowLegal(false), className:"px-3 py-1 rounded bg-zinc-200 dark:bg-zinc-800" }, "Annuler"),
+              e('button', { onClick:()=> { setForceAccepted(true); setForceRobots(true); setShowLegal(false); }, className:"px-3 py-1 rounded bg-red-600 text-white" }, "J’accepte")
+            )
+          )
+        ),
+
+        // Preview
+        preview && e('div', { className:"fixed inset-0 bg-black/70 flex items-center justify-center p-4" },
+          e('div', { className:"bg-zinc-900 text-white rounded-2xl max-w-5xl w-full overflow-hidden" },
+            e('div', { className:"flex items-center justify-between px-4 py-3" },
+              e('div', { className:"text-sm truncate" }, preview.fileName || preview.url),
+              e('div', { className:"flex items-center gap-2" },
+                e('button', { onClick:()=> downloadOne(preview.url), className:"px-3 py-1 rounded bg-white/20" }, "Télécharger"),
+                e('button', { onClick:()=> setPreview(null), className:"px-3 py-1 rounded bg-white/20" }, "Fermer")
+              )
+            ),
+            e('div', { className:"bg-black max-h-[75vh] overflow-auto flex items-center justify-center" },
+              preview.kind==="video"
+                ? e('video', { src:preview.url, controls:true, className:"max-w-full max-h-[75vh]" })
+                : e('img', { src:preview.url, className:"max-w-full max-h-[75vh]" })
+            ),
+            metaVisible && e('div', { className:"p-4 text-sm text-zinc-300 space-y-1" },
+              e('div', null, "Type : ", preview.contentType || preview.kind),
+              (preview.width && preview.height) && e('div', null, `Dim : ${preview.width}×${preview.height}`),
+              preview.size && e('div', null, `Poids : ~${Math.round(preview.size/1024)} kB`),
+              preview.pageUrl && e('div', { className:"truncate" }, "Page : ", e('a', { href:preview.pageUrl, target:"_blank", className:"underline" }, preview.pageUrl))
+            )
+          )
+        )
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(e(App));
+  </script>
+</body>
 </html>
