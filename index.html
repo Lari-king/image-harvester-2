@@ -1,424 +1,99 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="fr" class="dark">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Image Harvester</title>
-  <!-- Tailwind (UI) -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script> tailwind.config = { darkMode: 'class' } </script>
-  <!-- React 18 (CDN) -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-</head>
-<body class="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50">
-  <div id="root"></div>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Image Harvester</title>
+    <!-- Tailwind -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = { darkMode: "class" };
+    </script>
+    <!-- React 18 -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  </head>
+  <body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col">
+    <div id="root" class="flex-1"></div>
 
-  <script type="module">
-    const { useState, useEffect, useMemo } = React;
+    <script type="module">
+      // -------------------------------
+      // Choix de l’API dynamique
+      // -------------------------------
+      const API = (() => {
+        const u = new URL(location.href);
+        const param = u.searchParams.get("api");
+        if (param) return param; // priorité au ?api=...
+        // Fallback (met ici un Codespace par défaut si tu veux éviter de taper ?api= à chaque fois)
+        return "https://turbo-space-barnacle-5g5wgxv76qgq2p7vv-3001.app.github.dev/";
+      })();
 
-    const API = "http://localhost:3001";
-    const mediaIcon = (m)=> m.kind==="video" ? "🎞️" : "🖼️";
+      const e = React.createElement;
 
-    function Steps({log}) {
-      const done = log?.filter(s=>s.status!=="pending").length || 0;
-      const pct  = log?.length ? Math.round((done/log.length)*100) : 0;
-      return (
-        React.createElement('div', { className:"space-y-2" },
-          React.createElement('div', { className:"w-full h-2 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden" },
-            React.createElement('div', { className:"h-2 bg-emerald-500 transition-all", style:{ width:`${pct}%` }})
-          ),
-          React.createElement('ul', { className:"grid md:grid-cols-2 gap-2 text-sm" },
-            (log||[]).map((step,i)=> React.createElement('li', {
-              key:i, className:
-                "flex items-center justify-between px-3 py-2 rounded-xl border " +
-                (step.status==="success" ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-900/30" :
-                 step.status==="running" ? "border-amber-400 bg-amber-50 dark:bg-amber-900/30" :
-                 step.status==="error" ? "border-rose-400 bg-rose-50 dark:bg-rose-900/30" :
-                 "border-zinc-200 dark:border-zinc-800")
-            },
-              React.createElement('span', { className:"truncate" }, step.name),
-              step.status==="success" && "✅",
-              step.status==="running" && "⏳",
-              step.status==="error" && "❌"
-            ))
-          )
-        )
-      );
-    }
+      function App() {
+        const [urls, setUrls] = React.useState("");
+        const [logs, setLogs] = React.useState([]);
+        const [images, setImages] = React.useState([]);
 
-    function MediaCard({m, selected, onSelect, onPreview, onDownload}) {
-      return React.createElement('figure', { className:"relative rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800" },
-        (m.kind==="video"
-          ? React.createElement('video', { src:m.url, className:"w-full h-40 object-cover", muted:true, controls:false })
-          : React.createElement('img', { src:m.url, alt:m.alt||"", className:"w-full h-40 object-cover" })
-        ),
-        React.createElement('div', { className:"absolute top-2 right-2 flex gap-1" },
-          React.createElement('span', { className:"px-2 py-1 rounded bg-white/80 dark:bg-zinc-900/80 text-xs" }, mediaIcon(m)),
-          m.isDuplicate && React.createElement('span', { className:"px-2 py-1 rounded bg-rose-600 text-white text-xs" }, "doublon")
-        ),
-        React.createElement('div', { className:"absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent p-2 text-white text-[12px] flex items-center gap-2 justify-between" },
-          React.createElement('span', { className:"truncate" }, m.fileName || m.url.split('/').pop()),
-          React.createElement('div', { className:"flex items-center gap-2" },
-            React.createElement('button', { onClick:()=> onPreview(m), className:"px-2 py-1 bg-white/20 rounded" }, "Voir"),
-            React.createElement('button', { onClick:()=> onDownload(m.url), className:"px-2 py-1 bg-white/20 rounded" }, "Télécharger"),
-            React.createElement('label', { className:"bg-white/20 px-2 py-1 rounded cursor-pointer" },
-              React.createElement('input', { type:"checkbox", checked:!!selected[m.url], onChange:()=>onSelect(m.url) }),
-              " sel."
-            )
-          )
-        )
-      );
-    }
+        const startAnalysis = async () => {
+          setLogs([]);
+          setImages([]);
+          try {
+            const res = await fetch(`${API}/api/jobs`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ urls: urls.split("\n").map(u => u.trim()).filter(Boolean) })
+            });
+            if (!res.ok) throw new Error("Erreur job");
+            const { jobId } = await res.json();
+            setLogs(l => [...l, "Job lancé: " + jobId]);
 
-    function App() {
-      // Thème
-      const [dark, setDark] = useState(true);
-      useEffect(()=> { document.documentElement.classList.toggle('dark', dark); }, [dark]);
-
-      // Paramètres
-      const [urls, setUrls] = useState(["","","","",""]);
-      const [mode, setMode] = useState("compliance"); // "compliance" | "overdrive"
-      const [forceAccepted, setForceAccepted] = useState(false);
-      const [forceRobots, setForceRobots] = useState(false);
-      const [showLegal, setShowLegal] = useState(false);
-
-      // État run
-      const [isRunning, setIsRunning] = useState(false);
-      const [runs, setRuns] = useState([]); // [{site,ok,log,media:[]}]
-      const [activeTab, setActiveTab] = useState("overview");
-      const [stats, setStats] = useState({total:0, images:0, videos:0, duplicates:0});
-      const [metaVisible, setMetaVisible] = useState(false);
-
-      // Sélection + collections
-      const [selected, setSelected] = useState({});
-      const [collections, setCollections] = useState([]);
-      const [addingColl, setAddingColl] = useState(false);
-      const [collName, setCollName] = useState("");
-
-      // Preview
-      const [preview, setPreview] = useState(null);
-
-      const validUrls = useMemo(()=> urls.map(u=>u.trim()).filter(Boolean).slice(0,5), [urls]);
-      function toggleSelect(url){ setSelected(p=>({...p, [url]: !p[url]})); }
-      const allSelectedUrls = ()=> Object.entries(selected).filter(([,v])=>v).map(([u])=>u);
-
-      // Téléchargements
-      async function copyUrls() {
-        const list = allSelectedUrls();
-        if (!list.length) return alert("Sélectionne au moins un média.");
-        await navigator.clipboard.writeText(list.join("\n"));
-        alert(`${list.length} URL(s) copiée(s).`);
-      }
-      async function downloadZip() {
-        const list = allSelectedUrls();
-        if (!list.length) return alert("Sélectionne au moins un média.");
-        const r = await fetch(`${API}/api/zip`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ urls: list }) });
-        const blob = await r.blob(); const a=document.createElement('a');
-        a.href=URL.createObjectURL(blob); a.download=`media-${Date.now()}.zip`; a.click(); URL.revokeObjectURL(a.href);
-      }
-      function downloadOne(url) {
-        const a=document.createElement('a');
-        a.href=`${API}/api/file?url=${encodeURIComponent(url)}`;
-        a.download=""; a.target="_blank"; a.click();
-      }
-
-      // Collections
-      function addSelectionToCollection(name) {
-        const list = allSelectedUrls();
-        if (!name?.trim()) return alert("Nom de la collection ?");
-        if (!list.length) return alert("Sélectionne des médias.");
-        setCollections(prev=>{
-          const i = prev.findIndex(c=>c.name.toLowerCase()===name.toLowerCase());
-          if (i>=0) {
-            const c = {...prev[i]}; const set = new Set(c.items);
-            list.forEach(u=> set.add(u)); c.items = Array.from(set);
-            return prev.map((x,idx)=> idx===i ? c : x);
-          }
-          return [...prev, { name, items:[...list] }];
-        });
-        setAddingColl(false); setCollName("");
-        alert(`Ajouté à « ${name} » (${list.length} média(s)).`);
-      }
-      function removeFromCollection(name, url) {
-        setCollections(prev=> prev.map(c=> c.name===name ? {...c, items: c.items.filter(x=>x!==url)} : c));
-      }
-      function renameCollection(oldName, newName) {
-        if(!newName.trim()) return;
-        setCollections(prev=> prev.map(c=> c.name===oldName? {...c, name:newName} : c));
-      }
-      function deleteCollection(name) {
-        if(!confirm(`Supprimer la collection « ${name} » ?`)) return;
-        setCollections(prev=> prev.filter(c=> c.name!==name));
-      }
-
-      // --- RUN avec SSE (cinématique live + flux médias) ---------------------
-      async function run() {
-        if (!validUrls.length) return alert("Ajoute au moins 1 URL.");
-        if (forceRobots && !forceAccepted) return alert("Tu dois d’abord accepter l’avertissement pour forcer robots.txt.");
-
-        setIsRunning(true);
-        setRuns([]); setSelected({}); setStats({total:0, images:0, videos:0, duplicates:0});
-        setActiveTab("overview");
-
-        // 1) créer le job
-        const jobRes = await fetch(`${API}/api/jobs`, {
-          method:"POST", headers:{"Content-Type":"application/json"},
-          body: JSON.stringify({ urls: validUrls, options: { respectRobots:true, forceRobots:!!forceRobots, mode, timeoutMs: mode==="overdrive"? 20000 : 25000, maxScrolls: 12 } })
-        });
-        const { jobId } = await jobRes.json();
-
-        // 2) ouvrir le stream (SSE)
-        const es = new EventSource(`${API}/api/stream/${jobId}`);
-        const resultsBySite = {}; // site -> { log, media, ok }
-        setRuns([]);
-
-        es.onmessage = (ev) => {
-          const msg = JSON.parse(ev.data);
-          const { type, payload } = msg;
-
-          if (type==="snapshot") {
-            setRuns([]); // reset affichage
-          }
-          if (type==="progress") {
-            const { site, log } = payload;
-            resultsBySite[site] = resultsBySite[site] || { log:[], media:[], ok:null };
-            resultsBySite[site].log = log;
-            updateRuns();
-          }
-          if (type==="media") {
-            const { site, chunk } = payload;
-            resultsBySite[site] = resultsBySite[site] || { log:[], media:[], ok:null };
-            resultsBySite[site].media = [...resultsBySite[site].media, ...chunk];
-            updateRuns();
-            // stats live
-            const all = Object.values(resultsBySite).flatMap(r=>r.media);
-            const images = all.filter(m=>m.kind==="image").length;
-            const videos = all.filter(m=>m.kind==="video").length;
-            const duplicates = all.filter(m=>m.isDuplicate).length;
-            setStats({ total: all.length, images, videos, duplicates });
-          }
-          if (type==="siteDone") {
-            const { site, ok } = payload;
-            resultsBySite[site] = resultsBySite[site] || { log:[], media:[], ok:null };
-            resultsBySite[site].ok = ok;
-            updateRuns();
-          }
-          if (type==="done") {
-            es.close();
-            setIsRunning(false);
-            setActiveTab("gallery");
+            // Connexion SSE pour suivre la progression
+            const es = new EventSource(`${API}/api/run/${jobId}`);
+            es.onmessage = ev => {
+              try {
+                const data = JSON.parse(ev.data);
+                if (data.type === "log") {
+                  setLogs(l => [...l, data.message]);
+                } else if (data.type === "done") {
+                  setLogs(l => [...l, "Analyse terminée ✅"]);
+                  setImages(data.results || []);
+                  es.close();
+                }
+              } catch (err) {
+                console.error(err);
+              }
+            };
+          } catch (err) {
+            setLogs(l => [...l, "Erreur: " + err.message]);
           }
         };
 
-        es.onerror = () => {
-          es.close();
-          setIsRunning(false);
-          alert("Stream interrompu (voir console).");
-        };
-
-        // 3) lancer le job
-        await fetch(`${API}/api/run/${jobId}`, {
-          method:"POST", headers:{"Content-Type":"application/json"},
-          body: JSON.stringify({ options: { respectRobots:true, forceRobots:!!forceRobots, mode, timeoutMs: mode==="overdrive"? 20000 : 25000, maxScrolls: 12 } })
-        });
-
-        function updateRuns() {
-          const arr = Object.entries(resultsBySite).map(([site, rec]) => ({
-            site, ok: rec.ok, log: rec.log, media: rec.media
-          }));
-          setRuns(arr);
-        }
-      }
-
-      // UI
-      return (
-        React.createElement('div', { className:"max-w-7xl mx-auto p-6 space-y-6" },
-
-          // Header
-          React.createElement('div', { className:"flex items-center justify-between" },
-            React.createElement('div', { className:"flex items-center gap-3" },
-              React.createElement('div', { className:"h-10 w-10 rounded-2xl bg-white/70 dark:bg-white/10 backdrop-blur flex items-center justify-center shadow-sm" }, "✨"),
-              React.createElement('div', null,
-                React.createElement('h1', { className:"text-2xl font-semibold" }, "Image Harvester"),
-                React.createElement('div', { className:"text-xs text-zinc-500 dark:text-zinc-400" }, "Cinématique live • Images & vidéos • Collections")
-              )
-            ),
-            React.createElement('div', { className:"flex items-center gap-2" },
-              React.createElement('button', { onClick:()=> setDark(d=>!d), className:"px-3 py-1 rounded-full border border-zinc-300 dark:border-zinc-700 active:scale-95 transition" }, dark? "☀️" : "🌙"),
-              React.createElement('div', { className:"flex rounded-full overflow-hidden border border-zinc-300 dark:border-zinc-700" },
-                React.createElement('button', { onClick:()=> setMode("compliance"), className:"px-3 py-1 text-xs " + (mode==="compliance"?"bg-emerald-600 text-white":"bg-white dark:bg-zinc-800") }, "Compliance"),
-                React.createElement('button', { onClick:()=> setMode("overdrive"), className:"px-3 py-1 text-xs " + (mode==="overdrive"?"bg-rose-600 text-white":"bg-white dark:bg-zinc-800") }, "Overdrive")
-              )
-            )
+        return e("div", { className: "p-6 space-y-4 max-w-3xl mx-auto" }, [
+          e("h1", { className: "text-2xl font-bold" }, "Image Harvester"),
+          e("p", {}, "Backend API: " + API),
+          e("textarea", {
+            value: urls,
+            onChange: ev => setUrls(ev.target.value),
+            className: "w-full p-2 rounded bg-gray-800 border border-gray-700",
+            placeholder: "Collez 1 URL par ligne (ex: https://zara.com …)"
+          }),
+          e("button", {
+            className: "px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded",
+            onClick: startAnalysis
+          }, "Lancer l’analyse"),
+          e("div", { className: "bg-black/40 p-2 rounded max-h-48 overflow-auto text-sm" },
+            logs.map((l, i) => e("div", { key: i }, l))
           ),
-
-          // Inputs
-          React.createElement('div', { className:"rounded-3xl p-5 bg-white/70 dark:bg-white/10 backdrop-blur space-y-4" },
-            React.createElement('div', { className:"grid md:grid-cols-5 gap-2" },
-              urls.map((u,i)=> React.createElement('input', {
-                key:i, value:u, placeholder:`https://exemple-${i+1}.com`,
-                onChange: e=> setUrls(prev=> prev.map((v,idx)=> idx===i? e.target.value : v)),
-                className:"px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900"
-              }))
-            ),
-            React.createElement('div', { className:"flex items-center gap-3 text-sm" },
-              React.createElement('label', { className:"flex items-center gap-2" },
-                React.createElement('input', {
-                  type:"checkbox", checked:forceRobots,
-                  onChange:(e)=> {
-                    if (e.target.checked && !forceAccepted) { e.preventDefault(); setShowLegal(true); }
-                    else setForceRobots(e.target.checked);
-                  }
-                }),
-                "Forcer robots.txt (warning)"
-              ),
-              React.createElement('span', { className:"text-zinc-500 dark:text-zinc-400" }, "Overdrive reste conforme ; le forçage nécessite ton accord explicite.")
-            ),
-            React.createElement('div', { className:"flex items-center gap-2" },
-              React.createElement('button', { onClick: run, disabled: !validUrls.length || isRunning, className:"px-5 py-2 rounded-full bg-black text-white active:scale-95 transition disabled:opacity-50" }, isRunning?"Analyse…":"Lancer"),
-              React.createElement('button', { onClick:()=>{ setUrls(["","","","",""]); setRuns([]); setSelected({}); }, className:"px-5 py-2 rounded-full bg-zinc-200 dark:bg-zinc-800 active:scale-95 transition" }, "Reset"),
-              React.createElement('button', { onClick:()=> setAddingColl(true), className:"px-5 py-2 rounded-full border border-zinc-300 dark:border-zinc-700" }, "Ajouter à une collection")
-            )
-          ),
-
-          // Statistiques + Cinématique live
-          runs.length>0 && React.createElement('div', { className:"space-y-4" },
-            React.createElement('div', { className:"text-sm text-zinc-600 dark:text-zinc-300" },
-              `Statistiques : ${stats.total} média(s) — ${stats.images} images • ${stats.videos} vidéos • ${stats.duplicates} doublons`
-            ),
-            runs.map(r => React.createElement('div', { key:r.site, className:"rounded-2xl p-4 border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-white/10 space-y-3" },
-              React.createElement('div', { className:"flex items-center justify-between" },
-                React.createElement('div', { className:"font-semibold" }, r.site),
-                (r.ok===true) ? React.createElement('span', { className:"text-emerald-600" }, "✓ OK")
-                : (r.ok===false) ? React.createElement('span', { className:"text-rose-600" }, "✗ Échec")
-                : React.createElement('span', { className:"text-amber-600" }, "En cours…")
-              ),
-              React.createElement(Steps, { log: r.log||[] }),
-              (r.ok===false && r.log?.some(s=>s.error)) && React.createElement('div', { className:"text-sm text-rose-600" },
-                "Erreur : ", r.log.find(s=>s.error)?.error
-              )
-            ))
-          ),
-
-          // Tabs
-          React.createElement('div', { className:"flex gap-2" },
-            ["overview","gallery","collections"].map(k =>
-              React.createElement('button', { key:k, onClick:()=> setActiveTab(k), className:`px-3 py-1.5 rounded-full text-sm ${activeTab===k ? "bg-black text-white" : "bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700"}` }, k)
-            )
-          ),
-
-          // CONTENT
-          activeTab==="overview"
-            ? React.createElement('div', null, runs.length? "Analyse en direct ou terminée — vois ci-dessus la cinématique.":"Prêt à analyser")
-            : activeTab==="gallery"
-            ? React.createElement('div', { className:"space-y-4" },
-                React.createElement('div', { className:"flex items-center gap-2" },
-                  React.createElement('button', { onClick:()=> setAddingColl(true), className:"px-3 py-2 rounded-full border border-zinc-300 dark:border-zinc-700" }, "Ajouter à une collection"),
-                  React.createElement('button', { onClick: copyUrls, className:"px-3 py-2 rounded-full bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700" }, "Copier URL(s)"),
-                  React.createElement('button', { onClick: downloadZip, className:"px-3 py-2 rounded-full bg-black text-white" }, "Télécharger ZIP"),
-                  React.createElement('label', { className:"ml-auto flex items-center gap-2 text-sm" },
-                    React.createElement('input', { type:"checkbox", checked:metaVisible, onChange:()=> setMetaVisible(v=>!v) }),
-                    "Afficher métadonnées"
-                  )
-                ),
-                runs.map(r =>
-                  React.createElement('div', { key:r.site },
-                    React.createElement('div', { className:"font-medium mb-2" }, r.site),
-                    React.createElement('div', { className:"grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3" },
-                      (r.media||[]).map(m =>
-                        React.createElement('div', { key:m.url, className:"space-y-1" },
-                          React.createElement(MediaCard, { m, selected, onSelect:toggleSelect, onPreview:setPreview, onDownload:downloadOne }),
-                          metaVisible && React.createElement('div', { className:"text-[11px] text-zinc-600 dark:text-zinc-300 space-y-0.5" },
-                            React.createElement('div', null, "Type : ", m.contentType || m.kind),
-                            (m.width && m.height) && React.createElement('div', null, `Dim : ${m.width}×${m.height}`),
-                            m.size && React.createElement('div', null, `Poids : ~${Math.round(m.size/1024)} kB`),
-                            m.pageUrl && React.createElement('div', { className:"truncate" }, "Page : ", React.createElement('a', { href:m.pageUrl, target:"_blank", className:"underline" }, m.pageUrl))
-                          )
-                        )
-                      )
-                    )
-                  )
-                )
-              )
-            : React.createElement('div', { className:"space-y-4" },
-                collections.length? collections.map(c =>
-                  React.createElement('div', { key:c.name, className:"rounded-2xl border border-zinc-200 dark:border-zinc-800 p-4 bg-white/70 dark:bg-white/10 space-y-3" },
-                    React.createElement('div', { className:"flex items-center gap-2" },
-                      React.createElement('input', {
-                        defaultValue:c.name,
-                        onBlur:(e)=> renameCollection(c.name, e.target.value),
-                        className:"px-2 py-1 rounded border border-zinc-300 dark:border-zinc-700 bg-transparent font-semibold"
-                      }),
-                      React.createElement('span', { className:"text-xs text-zinc-500" }, c.items.length, " média(s)"),
-                      React.createElement('button', { onClick:()=> deleteCollection(c.name), className:"ml-auto px-3 py-1 rounded-full bg-rose-600 text-white text-xs" }, "Supprimer")
-                    ),
-                    React.createElement('div', { className:"grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3" },
-                      c.items.map(u =>
-                        React.createElement('figure', { key:u, className:"relative rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800" },
-                          React.createElement('img', { src:u, className:"w-full h-32 object-cover" }),
-                          React.createElement('button', { onClick:()=> removeFromCollection(c.name, u), className:"absolute top-2 right-2 px-2 py-1 rounded bg-rose-600 text-white text-xs" }, "Retirer")
-                        )
-                      )
-                    )
-                  )
-                ) : React.createElement('div', { className:"text-sm text-zinc-500" }, "Aucune collection pour l’instant.")
-              ),
-
-          /* Modal juridique (forçage robots.txt) */
-          showLegal && React.createElement('div', { className:"fixed inset-0 bg-black/40 flex items-center justify-center" },
-            React.createElement('div', { className:"bg-white dark:bg-zinc-900 p-6 rounded-2xl max-w-md space-y-4" },
-              React.createElement('h2', { className:"font-bold text-lg" }, "Avertissement — responsabilité de l’utilisateur"),
-              React.createElement('p', { className:"text-sm text-zinc-600 dark:text-zinc-300 whitespace-pre-line" },
-                "En choisissant d’ignorer les indications du fichier robots.txt, vous reconnaissez agir sciemment contre les pratiques standards du web et en assumant seul la pleine et entière responsabilité des conséquences possibles (blocage de votre adresse IP, actions juridiques éventuelles des éditeurs des sites analysés, ou toute autre conséquence technique ou légale).\n\nL’éditeur de la plateforme ne cautionne pas ce mode, ne fournit aucune garantie quant à son utilisation et décline toute responsabilité en cas de dommage, sanction, ou perte résultant de son usage.\n\nEn validant, vous confirmez être le seul responsable et décharger expressément l’éditeur de toute responsabilité."
-              ),
-              React.createElement('div', { className:"flex justify-end gap-2" },
-                React.createElement('button', { onClick:()=> setShowLegal(false), className:"px-3 py-1 rounded bg-zinc-200 dark:bg-zinc-800" }, "Annuler"),
-                React.createElement('button', { onClick:()=> { setForceAccepted(true); setForceRobots(true); setShowLegal(false); }, className:"px-3 py-1 rounded bg-red-600 text-white" }, "J’accepte")
-              )
-            )
-          ),
-
-          /* Modal d’ajout en collection (raccourci) */
-          addingColl && React.createElement('div', { className:"fixed inset-0 bg-black/30 flex items-center justify-center" },
-            React.createElement('div', { className:"bg-white dark:bg-zinc-900 rounded-2xl p-4 w-[420px] space-y-3" },
-              React.createElement('div', { className:"font-medium" }, "Ajouter à une collection"),
-              React.createElement('input', { value:collName, onChange:e=> setCollName(e.target.value), placeholder:"Nom de la collection", className:"w-full px-3 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900" }),
-              React.createElement('div', { className:"flex items-center justify-end gap-2" },
-                React.createElement('button', { onClick:()=> setAddingColl(false), className:"px-3 py-2 rounded-full border border-zinc-300 dark:border-zinc-700" }, "Annuler"),
-                React.createElement('button', { onClick:()=> addSelectionToCollection(collName), className:"px-3 py-2 rounded-full bg-black text-white" }, "Ajouter")
-              )
-            )
-          ),
-
-          /* Preview plein écran */
-          preview && React.createElement('div', { className:"fixed inset-0 bg-black/70 flex items-center justify-center p-4" },
-            React.createElement('div', { className:"bg-zinc-900 text-white rounded-2xl max-w-5xl w-full overflow-hidden" },
-              React.createElement('div', { className:"flex items-center justify-between px-4 py-3" },
-                React.createElement('div', { className:"text-sm truncate" }, preview.fileName || preview.url),
-                React.createElement('div', { className:"flex items-center gap-2" },
-                  React.createElement('button', { onClick:()=> downloadOne(preview.url), className:"px-3 py-1 rounded bg-white/20" }, "Télécharger"),
-                  React.createElement('button', { onClick:()=> setPreview(null), className:"px-3 py-1 rounded bg-white/20" }, "Fermer")
-                )
-              ),
-              React.createElement('div', { className:"bg-black max-h-[75vh] overflow-auto flex items-center justify-center" },
-                preview.kind==="video"
-                  ? React.createElement('video', { src:preview.url, controls:true, className:"max-w-full max-h-[75vh]" })
-                  : React.createElement('img', { src:preview.url, className:"max-w-full max-h-[75vh]" })
-              ),
-              metaVisible && React.createElement('div', { className:"p-4 text-sm text-zinc-300 space-y-1" },
-                React.createElement('div', null, "Type : ", preview.contentType || preview.kind),
-                (preview.width && preview.height) && React.createElement('div', null, `Dim : ${preview.width}×${preview.height}`),
-                preview.size && React.createElement('div', null, `Poids : ~${Math.round(preview.size/1024)} kB`),
-                preview.pageUrl && React.createElement('div', { className:"truncate" }, "Page : ", React.createElement('a', { href:preview.pageUrl, target:"_blank", className:"underline" }, preview.pageUrl))
-              )
+          e("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-2" },
+            images.map((src, i) =>
+              e("img", { key: i, src, className: "rounded shadow" })
             )
           )
-        )
-      );
-    }
+        ]);
+      }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
-  </script>
-</body>
+      ReactDOM.createRoot(document.getElementById("root")).render(e(App));
+    </script>
+  </body>
 </html>

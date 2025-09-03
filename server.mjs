@@ -121,7 +121,7 @@ app.post("/api/run/:jobId", async (req, res) => {
   pushEvent(job, { type:"start", payload:{ options: opt } });
 
   // Launch Chrome installé
-  const browser = await chromium.launch({ channel:"chrome", headless:true });
+  const browser = await chromium.launch({ headless:true });
   const context = await browser.newContext({
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36",
     locale: "fr-FR", timezoneId: "Europe/Paris"
