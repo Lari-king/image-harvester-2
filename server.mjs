@@ -4,6 +4,12 @@ import fetch from "node-fetch";             // v2
 import robotsParser from "robots-parser";
 import { chromium } from "playwright";      // Chromium Playwright (cloud)
 import Archiver from "archiver";
+import cors from "cors";
+app.use(cors({
+  origin:"*",
+  methods:["GET","POST","OPTIONS"],
+  allowedHeaders:["content-type"]
+}));
 
 // -------------------- App base -------------------- 
 const app = express(); app.use(cors()); app.use(express.json({ limit: "1mb" }));
@@ -442,3 +448,11 @@ app.get("/api/file", async (req, res) => {
 // -------------------- Start ----------------------- 
 const PORT = process.env.PORT || 3001; app.listen(PORT, () => {
   console.log(`API ok sur http://localhost:${PORT} (GET /health)`); });
+
+app.get("/version",(req,res) => {
+  res.json({
+    app: "image-harvester-backend",
+    version: "0.2.0-cors-enabled",
+    now: new Date().toISOString()
+  });
+});
