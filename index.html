@@ -18,11 +18,12 @@
     // -------------------------------
     // API dynamique via ?api=
     // -------------------------------
-    const FALLBACK_API = "https://turbo-space-barnacle-5g5wgxv76qgq2p7vv-3001.app.github.dev/"; // <-- mets ici ton URL par défaut
+    const FALLBACK_API = "https://turbo-space-barnacle-5g5wgxv76qgq2p7vv-3001.app.github.dev"; // <-- sans slash final
     const API = (() => {
       const u = new URL(location.href);
       const p = u.searchParams.get("api");
-      return (p && /^https:\/\//.test(p)) ? p : FALLBACK_API;
+      const base = (p && /^https:\/\//.test(p)) ? p : FALLBACK_API;
+      return base.replace(/\/+$/, ""); // retire les slash finaux
     })();
 
     const { useState, useEffect, useMemo } = React;
@@ -112,14 +113,19 @@
         await navigator.clipboard.writeText(list.join("\n"));
         alert(`${list.length} URL(s) copiée(s).`);
       }
+
       async function downloadZip() {
         const list = allSelectedUrls();
         if (!list.length) return alert("Sélectionne au moins un média.");
-        const r = await fetch(`${API}/api/zip`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ urls: list }) });
+        const r = await fetch(`${API}/api/zip`, { 
+          method:"POST", headers:{ "Content-Type":"application/json" }, 
+          body: JSON.stringify({ urls: list }) 
+        }).catch(e=>{ alert("Erreur réseau (zip): " + e.message); throw e; });
         if(!r.ok) return alert("Téléchargement ZIP impossible.");
         const blob = await r.blob(); const a=document.createElement('a');
         a.href=URL.createObjectURL(blob); a.download=`media-${Date.now()}.zip`; a.click(); URL.revokeObjectURL(a.href);
       }
+
       function downloadOne(url) {
         const a=document.createElement('a');
         a.href=`${API}/api/file?url=${encodeURIComponent(url)}`;
@@ -157,7 +163,7 @@
           const jobRes = await fetch(`${API}/api/jobs`, {
             method:"POST", headers:{"Content-Type":"application/json"},
             body: JSON.stringify({ urls: validUrls, options: { respectRobots:true, forceRobots:!!forceRobots, mode, timeoutMs: mode==="overdrive"? 20000 : 25000, maxScrolls: 12 } })
-          });
+          }).catch(e=>{ alert("Erreur réseau (jobs): " + e.message); throw e; });
           if(!jobRes.ok) throw new Error("jobs: " + jobRes.status);
           const { jobId } = await jobRes.json();
 
@@ -213,7 +219,7 @@
           const runRes = await fetch(`${API}/api/run/${jobId}`, {
             method:"POST", headers:{"Content-Type":"application/json"},
             body: JSON.stringify({ options: { respectRobots:true, forceRobots:!!forceRobots, mode, timeoutMs: mode==="overdrive"? 20000 : 25000, maxScrolls: 12 } })
-          });
+          }).catch(e=>{ alert("Erreur réseau (run): " + e.message); throw e; });
           if(!runRes.ok) console.warn("run status", runRes.status);
 
         } catch (err) {
@@ -371,6 +377,10 @@
 
     ReactDOM.createRoot(document.getElementById('root')).render(e(App));
   </script>
-  <p class="text-xs text-gray-400 dark:text-gray-500 mt-4 text-center"> Image Harvester Front V0.2.0</p>
+
+  <p class="text-xs text-gray-400 dark:text-gray-500 mt-4 text-center">
+    Image Harvester Front V0.2.0
+  </p>
 </body>
 </html>
+

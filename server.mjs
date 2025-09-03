@@ -1,41 +1,42 @@
-// server.mjs — Backend Image Harvester (Codespaces-ready, ESM) 
+// server.mjs — Image Harvester Backend (Codespaces-ready, ESM)
+
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";             // v2
 import robotsParser from "robots-parser";
-import { chromium } from "playwright";      // Chromium Playwright (cloud)
+import { chromium } from "playwright";      // Chromium Playwright (cloud-friendly)
 import Archiver from "archiver";
 
+// -------------------- App base -------------------- 
 const app = express();
+
 app.use(cors({
-  origin:"*",
-  methods:["GET","POST","OPTIONS"],
-  allowedHeaders:["content-type"]
+  origin: "*", // en dev on autorise tout (pour prod: remplace par "https://<ton-github-username>.github.io")
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"]
 }));
 app.use(express.json({ limit: "1mb" }));
 
+// Racine informative (évite "Cannot GET /") 
+app.get("/", (req, res) => {
+  res.type("text/plain").send("Image Harvester API — see /health or /version"); });
+
+// Version/Health
+app.get("/version", (req, res) => {
+  res.json({ app: "image-harvester-backend", version: "0.2.0-cors-enabled", now: new Date().toISOString() }); }); app.get("/health", (req, res) => {
+  res.json({ ok: true, now: new Date().toISOString() }); });
+
 // -------------------- Utils ----------------------- 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); 
-const hostOf = (u) => {
-  try { return new URL(u).hostname.replace(/^www\./, ""); }
-  catch (e) { return u; }
-};
-const normUrl = (u) => {
-  try { return new URL(u).toString(); }
-  catch (e) { return u; }
-};
-function canonicalUrl(raw) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return u; } }; const normUrl = (u) => { try { return new URL(u).toString(); } catch (e) { return u; } }; function canonicalUrl(raw) {
   try {
     const u = new URL(raw);
     const drop = new Set([
-      "w", "h", "width", "height", "q", "quality", "fit", "format", "fm", "auto", "dpr",
-      "ixid", "ixlib", "crop", "cs", "usm", "ix", "s",
-      "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"
+      "w","h","width","height","q","quality","fit","format","fm","auto","dpr",
+      "ixid","ixlib","crop","cs","usm","ix","s",
+      "utm_source","utm_medium","utm_campaign","utm_term","utm_content"
     ]);
     const keys = Array.from(u.searchParams.keys());
-    keys.forEach((k) => {
-      if (drop.has(k.toLowerCase())) u.searchParams.delete(k);
-    });
+    keys.forEach((k) => { if (drop.has(k.toLowerCase())) u.searchParams.delete(k); });
     return u.toString();
   } catch (e) {
     return raw;
@@ -60,10 +61,7 @@ async function getRobotsAllows(url) {
     if (!res.ok) return { allowed: () => true, source: "missing" };
     const txt = await res.text();
     const parser = robotsParser(robotsUrl, txt);
-    return {
-      allowed: (path) => parser.isAllowed(`${u.origin}${path}`, "ImageHarvesterBot"),
-      source: "ok",
-    };
+    return { allowed: (path) => parser.isAllowed(`${u.origin}${path}`, "ImageHarvesterBot"), source: "ok" };
   } catch (e) {
     return { allowed: () => true, source: "error" };
   }
@@ -78,31 +76,20 @@ function makeSteps() {
     { key: "scroll",    name: "Défilement pour lazy-load", status: "pending" },
     { key: "extract",   name: "Extraction DOM + Réseau", status: "pending" },
     { key: "dedupe",    name: "Déduplication & métadonnées", status: "pending" },
-    { key: "done",      name: "Terminé", status: "pending" },
+    { key: "done",      name: "Terminé", status: "pending" }
   ];
 }
 function setRun(steps, k) { const s = steps.find((x) => x.key === k); if (s) s.status = "running"; } function setOk(steps, k)  { const s = steps.find((x) => x.key === k); if (s) s.status = "success"; } function setErr(steps, k, m) { const s = steps.find((x) => x.key === k); if (s) { s.status = "error"; s.error = String(m); } }
 
 // -------------------- Jobs + SSE ------------------
-/**
- * job: {
- *   jobId, createdAt, urls, options,
- *   resultsBySite: { [site]: { log:[], media:[], ok:null|boolean, error?:string } },
- *   streams: Set(res), done:boolean
- * }
- */
+// job: { jobId, createdAt, urls, options, resultsBySite: { [site]: { log, media, ok, error? } }, streams:Set(res), done } 
 const jobs = new Map();
 
 function newJob(urls, options) {
   const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const job = {
-    jobId,
-    createdAt: Date.now(),
-    urls,
-    options,
-    resultsBySite: {},
-    streams: new Set(),
-    done: false,
+    jobId, createdAt: Date.now(), urls, options,
+    resultsBySite: {}, streams: new Set(), done: false
   };
   jobs.set(jobId, job);
   return job;
@@ -111,7 +98,7 @@ function pushEvent(job, event) {
   const line = `data: ${JSON.stringify(event)}\n\n`;
   for (const res of job.streams) res.write(line); }
 
-// create job
+// 1) créer un job
 app.post("/api/jobs", (req, res) => {
   const body = req.body || {};
   const urls = Array.isArray(body.urls) ? body.urls : [];
@@ -119,14 +106,13 @@ app.post("/api/jobs", (req, res) => {
   if (urls.length === 0) return res.status(400).json({ error: "Provide urls: string[]" });
 
   const job = newJob(urls, options);
-  // snapshot initial (pour le front)
   for (const u of job.urls) {
     const site = hostOf(u);
     job.resultsBySite[site] = { log: makeSteps(), media: [], ok: null };
   }
   return res.json({ jobId: job.jobId }); });
 
-// stream SSE
+// 2) flux SSE de progression
 app.get("/api/stream/:jobId", (req, res) => {
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).end();
@@ -140,7 +126,7 @@ app.get("/api/stream/:jobId", (req, res) => {
   res.write(`data: ${JSON.stringify({ type: "snapshot", payload: job })}\n\n`);
   req.on("close", () => { job.streams.delete(res); }); });
 
-// run job
+// 3) lancer le job
 app.post("/api/run/:jobId", async (req, res) => {
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: "Unknown job" });
@@ -151,7 +137,7 @@ app.post("/api/run/:jobId", async (req, res) => {
     forceRobots: !!given.forceRobots,
     timeoutMs: Math.min(45000, Math.max(8000, typeof given.timeoutMs === "number" ? given.timeoutMs : 25000)),
     maxScrolls: Math.min(30, Math.max(5, typeof given.maxScrolls === "number" ? given.maxScrolls : 12)),
-    mode: given.mode === "overdrive" ? "overdrive" : "compliance",
+    mode: given.mode === "overdrive" ? "overdrive" : "compliance"
   };
 
   pushEvent(job, { type: "start", payload: { options: opt } });
@@ -161,7 +147,7 @@ app.post("/api/run/:jobId", async (req, res) => {
   const context = await browser.newContext({
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36",
     locale: "fr-FR",
-    timezoneId: "Europe/Paris",
+    timezoneId: "Europe/Paris"
   });
   await context.addInitScript(() => {
     try { Object.defineProperty(navigator, "webdriver", { get: () => false }); } catch (e) {}
@@ -196,8 +182,8 @@ app.post("/api/run/:jobId", async (req, res) => {
   } finally {
     try { await context.close(); } catch (e) {}
     try { await browser.close(); } catch (e) {}
-    job.done = true;
-    pushEvent(job, { type: "done", payload: {} });
+    const job2 = jobs.get(req.params.jobId);
+    if (job2) { job2.done = true; pushEvent(job2, { type: "done", payload: {} }); }
   }
 
   res.json({ ok: true });
@@ -207,7 +193,6 @@ app.post("/api/run/:jobId", async (req, res) => {
 async function extractFromUrlAdvanced(page, startUrl, opts, log, helpers) {
   const notify = helpers.notify;
   const addMedia = helpers.addMedia;
-
   const run = (k) => { setRun(log, k); notify(); };
   const ok  = (k) => { setOk(log, k);  notify(); };
   const err = (k, m) => { setErr(log, k, m); notify(); };
@@ -345,7 +330,7 @@ async function extractFromUrlAdvanced(page, startUrl, opts, log, helpers) {
   });
   addMedia(chunk4.map(metaWrap));
 
-  // videos
+  // vidéos
   const chunk5 = await page.evaluate(() => {
     const out = [];
     const abs = (u) => { try { return new URL(u, location.href).toString(); } catch (e) { return u; } };
@@ -385,17 +370,7 @@ async function extractFromUrlAdvanced(page, startUrl, opts, log, helpers) {
 
 function metaWrap(m) {
   const canon = canonicalUrl(m.url);
-  return {
-    ...m,
-    canonical: canon,
-    isDuplicate: m.url !== canon,
-    fileName: m.url.split("/").pop() || undefined,
-  };
-}
-
-// -------------------- Health ---------------------- 
-app.get("/health", (req, res) => {
-  res.json({ ok: true, now: new Date().toISOString() }); });
+  return { ...m, canonical: canon, isDuplicate: m.url !== canon, fileName: m.url.split("/").pop() || undefined }; }
 
 // -------------------- ZIP sélection --------------- 
 app.post("/api/zip", async (req, res) => {
@@ -416,10 +391,10 @@ app.post("/api/zip", async (req, res) => {
       if (!r.ok) continue;
       const ct = r.headers.get("content-type") || "";
       const ext =
-        ct.indexOf("png") >= 0 ? "png" :
+        ct.indexOf("png") >= 0  ? "png"  :
         ct.indexOf("webp") >= 0 ? "webp" :
-        ct.indexOf("gif") >= 0 ? "gif" :
-        ct.indexOf("mp4") >= 0 ? "mp4" :
+        ct.indexOf("gif") >= 0  ? "gif"  :
+        ct.indexOf("mp4") >= 0  ? "mp4"  :
         ct.indexOf("webm") >= 0 ? "webm" :
         (ct.indexOf("jpg") >= 0 || ct.indexOf("jpeg") >= 0) ? "jpg" : "bin";
       const name = `media_${String(i++).padStart(4, "0")}.${ext}`;
@@ -429,7 +404,7 @@ app.post("/api/zip", async (req, res) => {
   archive.finalize();
 });
 
-// -------------------- Téléchargement unitaire ----- 
+// -------------------- Téléchargement unitaire -----
 app.get("/api/file", async (req, res) => {
   const url = req.query && req.query.url;
   if (!url) return res.status(400).send("Missing url");
@@ -449,11 +424,3 @@ app.get("/api/file", async (req, res) => {
 // -------------------- Start ----------------------- 
 const PORT = process.env.PORT || 3001; app.listen(PORT, () => {
   console.log(`API ok sur http://localhost:${PORT} (GET /health)`); });
-
-app.get("/version",(req,res) => {
-  res.json({
-    app: "image-harvester-backend",
-    version: "0.2.0-cors-enabled",
-    now: new Date().toISOString()
-  });
-});
